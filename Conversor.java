@@ -12,16 +12,18 @@ public class Conversor {
     p += 8;
     
     aluno.put(a.getNome().getBytes());
-    aluno.position(p += 60);
+    p += 60;
+    aluno.position(p);
     
     aluno.put(a.getEndereco().getBytes());
-    aluno.position(p += 80);
+    p += 80;
+    aluno.position(p);
     
     aluno.put(a.getEmail().getBytes());
-    aluno.position(p += 50);
+    p += 50;
+    aluno.position(p);
     
     aluno.putShort(a.getCurso());
-    p += 2;
     
     aluno.flip();
     
@@ -32,14 +34,21 @@ public class Conversor {
     buf.position(0);
     
     Aluno newAluno = new Aluno();
+    byte[] byteHolder;
     
     newAluno.setMatricula(buf.getLong());
   
-    newAluno.setNome(buf.get(new byte[60]).toString());
+    byteHolder = new byte[60];
+    buf.get(byteHolder);
+    newAluno.setNome(new String(byteHolder));
   
-    newAluno.setEndereco(buf.get(new byte[80]).toString());
+    byteHolder = new byte[80];
+    buf.get(byteHolder);
+    newAluno.setEndereco(new String(byteHolder));
   
-    newAluno.setEmail(buf.get(new byte[50]).toString());
+    byteHolder = new byte[50];
+    buf.get(byteHolder);
+    newAluno.setEmail(new String(byteHolder));
   
     newAluno.setCurso(buf.getShort());
     
