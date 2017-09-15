@@ -7,24 +7,33 @@ import java.nio.channels.FileChannel;
 
 class OrganizadorBrent implements IFileOrganizer {
   FileChannel channel;
+  int p = 120000017;
   
-  public OrganizadorBrent(String fileName) throws FileNotFoundException {
-    File file = new File(fileName);
-    RandomAccessFile rf = new RandomAccessFile(file, "rw");
+  public OrganizadorBrent(File file, String permissions) {
+    RandomAccessFile rf = null;
+    try {
+      rf = new RandomAccessFile(file, "rw");
+    } catch (FileNotFoundException e) {
+      e.printStackTrace();
+    }
     channel = rf.getChannel();
   }
   
+  private int cycleEndsOfTable(int pos){
+    return pos >= p ? pos - p : pos;
+  }
+  
   private int brentStep(long matric) {
-    int p = 120000017;
     return (int) (matric % (p - 2) + 1);
   }
   
   private int hash(long matric) {
-    return (int) matric;
+    int hash =  ((int) matric) % p;
+    return hash;
   }
   
   private ByteBuffer alunoBufferAt(int pos) {
-    long bytePosition = pos * Aluno.SIZE;
+    long bytePosition = cycleEndsOfTable(pos) * (long) Aluno.SIZE;
     ByteBuffer aluno = ByteBuffer.allocate(Aluno.SIZE);
     try {
       channel.read(aluno, bytePosition);
@@ -35,14 +44,23 @@ class OrganizadorBrent implements IFileOrganizer {
     return aluno;
   }
   
+  private boolean isBufferReal(ByteBuffer reg){
+    reg.position(0);
+    long registryMatr = reg.getLong();
+    reg.position(0);
+    return registryMatr > 0;
+  }
+  
   private boolean isRegistryEmpty(int pos) {
-    ByteBuffer aluno = this.alunoBufferAt(pos);
+    ByteBuffer aluno = this.alunoBufferAt(cycleEndsOfTable(pos));
     return aluno.getLong() == 0;
   }
   
   private void insertRecordInto(ByteBuffer record, int pos) {
+    record.position(0);
     try {
-      channel.write(record, pos * Aluno.SIZE);
+      long bytePosition = cycleEndsOfTable(pos) * (long) Aluno.SIZE;
+      channel.write(record, bytePosition);
     } catch (IOException e) {
       e.printStackTrace();
     }
@@ -55,74 +73,66 @@ class OrganizadorBrent implements IFileOrganizer {
     // SPC = Secondary Probe Chain
     
     ByteBuffer aluno = Conversor.toByteBuffer(p);
-    
-    int hash = this.hash(p.getMatricula());
-    
+    long pMatricula = p.getMatricula();
+    int hash = this.hash(pMatricula);
     // if home adress is empty set record
     if (isRegistryEmpty(hash)) {
       this.insertRecordInto(aluno, hash);
     } else {
       
-      // Calculates PPC incrementor, and computes next possible position
-      int ppcStep = this.brentStep(p.getMatricula());
-      int nextPos = hash + ppcStep;
-      
-      // PPC counter
-      int s = 2;
-      
-      while (!isRegistryEmpty(nextPos)) {
-        // if it's the home adress, stop, the table is full
-        if (nextPos == hash) {
-          System.err.println("full table");
-          return;
-        }
-        // if the record is the same as the one being inserted, stop, duplicate record
-        ByteBuffer alu = this.alunoBufferAt(nextPos);
-        if (alu.getLong() == p.getMatricula()) {
-          System.err.println("duplicate record");
-          return;
-        }
-        // Compute next step
-        nextPos += ppcStep;
-        
-        // increment PPC counter
-        s++;
-      }
-      
-      // PPC reader counter
+      //  ppcInc multiplier
       int i = 1;
-      // SPC reader counter
-      int j = 1;
+      //  spcInc multiplier
+      int j = 0;
       
-      while (i + j < s) {
-        int ppcIndex = hash + ((i-1) * ppcStep);
-  
-        ByteBuffer ppcAluno = this.alunoBufferAt(ppcIndex);
-  
-        int spcStep = this.brentStep(Conversor.toAluno(ppcAluno).getMatricula());
+      // first PPC position (Home Adress)
+      int ppcPos = hash;
+      int ppcInc = this.brentStep(pMatricula);
+      
+      //  since the first insertion probe is on p(2,0) always, no consideration for the spc is needed
+      int spcInc = 0;
+      
+      //  Computes the first position acessed by the seeker that will traverse the positions.
+      //  This will return p(2,0) position
+      int seekerProbePos = ppcPos + (i * ppcInc);
+      
+      ByteBuffer seekerResult = this.alunoBufferAt(seekerProbePos);
+      
+      while(this.isBufferReal(seekerResult)){
         
-        int spcIndex = ppcIndex + (j * spcStep);
-        
-        if(this.isRegistryEmpty(spcIndex)){
-          this.insertRecordInto(ppcAluno, spcIndex);
-          this.insertRecordInto(aluno, ppcIndex);
-          System.err.println("Insertion successful");
-          return;
+        //  vary i and j
+        if(j==0){
+          j = i;
+          i = 0;
         }else{
-          // vary i and j
-          i++;
           j--;
-          
-          if(j <= 0){
-            j = i;
-            i = 1;
-          }
+          i++;
+          if(j==0)
+            i++;
         }
-        
+        ByteBuffer ppcAluno = this.alunoBufferAt(ppcPos);
+        spcInc = this.brentStep(ppcAluno.getLong());
+        seekerProbePos = (ppcPos + (i * ppcInc)) + (j * spcInc);
+        seekerResult = this.alunoBufferAt(seekerProbePos);
       }
-      
-      this.insertRecordInto(aluno, s);
-      System.err.println("Insertion successful");
+  
+      if(j > 0){  //  spc offset of a registry on the ppc
+        
+        int ppcPosition = ppcPos + (i * ppcInc);
+        
+        // gets the aluno at PPC
+        ByteBuffer ppcAluno = this.alunoBufferAt(ppcPosition);
+        
+        this.insertRecordInto(ppcAluno, seekerProbePos);
+        
+        this.insertRecordInto(aluno, ppcPosition);
+        
+        System.err.println("Insertion Successful with movement to the SPC");
+      }else{      //  directly on ppc
+        this.insertRecordInto(aluno, ppcPos + (i * ppcInc));
+        System.err.println("Insertion Successful on PPC");
+      }
+ 
     }
     
   }
