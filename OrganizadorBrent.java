@@ -7,7 +7,7 @@ import java.nio.channels.FileChannel;
 
 class OrganizadorBrent implements IFileOrganizer {
   FileChannel channel;
-  int p = 120000017;
+  int p = 12000017;
   
   public OrganizadorBrent(File file, String permissions) {
     RandomAccessFile rf = null;
@@ -19,7 +19,7 @@ class OrganizadorBrent implements IFileOrganizer {
     channel = rf.getChannel();
   }
   
-  private int cycleEndsOfTable(int pos){
+  private int preventTableOverflow(int pos){
     return pos >= p ? pos - p : pos;
   }
   
@@ -33,7 +33,8 @@ class OrganizadorBrent implements IFileOrganizer {
   }
   
   private ByteBuffer alunoBufferAt(int pos) {
-    long bytePosition = cycleEndsOfTable(pos) * (long) Aluno.SIZE;
+    int position = this.preventTableOverflow(pos);
+    long bytePosition = position * (long) Aluno.SIZE;
     ByteBuffer aluno = ByteBuffer.allocate(Aluno.SIZE);
     try {
       channel.read(aluno, bytePosition);
@@ -52,18 +53,39 @@ class OrganizadorBrent implements IFileOrganizer {
   }
   
   private boolean isRegistryEmpty(int pos) {
-    ByteBuffer aluno = this.alunoBufferAt(cycleEndsOfTable(pos));
+    int position = this.preventTableOverflow(pos);
+    ByteBuffer aluno = this.alunoBufferAt(position);
     return aluno.getLong() == 0;
   }
   
   private void insertRecordInto(ByteBuffer record, int pos) {
+    int position = this.preventTableOverflow(pos);
     record.position(0);
     try {
-      long bytePosition = cycleEndsOfTable(pos) * (long) Aluno.SIZE;
+      long bytePosition = position * (long) Aluno.SIZE;
       channel.write(record, bytePosition);
     } catch (IOException e) {
       e.printStackTrace();
     }
+  }
+  
+  private Aluno deleteAlunoAt(int pos){
+    int position = this.preventTableOverflow(pos);
+    ByteBuffer bfEmpty = ByteBuffer.allocateDirect(Aluno.SIZE);
+    ByteBuffer bfAluno = ByteBuffer.allocate(Aluno.SIZE);
+    try {
+      long bytePosition = position * (long) Aluno.SIZE;
+      
+      channel.read(bfAluno, bytePosition);
+      
+      channel.write(bfEmpty, bytePosition);
+      
+      return Conversor.toAluno(bfAluno);
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+    
+    return null;
   }
   
   @Override
@@ -110,7 +132,7 @@ class OrganizadorBrent implements IFileOrganizer {
           if(j==0)
             i++;
         }
-        ByteBuffer ppcAluno = this.alunoBufferAt(ppcPos);
+        ByteBuffer ppcAluno = this.alunoBufferAt(ppcPos + (i * ppcInc));
         spcInc = this.brentStep(ppcAluno.getLong());
         seekerProbePos = (ppcPos + (i * ppcInc)) + (j * spcInc);
         seekerResult = this.alunoBufferAt(seekerProbePos);
@@ -139,11 +161,66 @@ class OrganizadorBrent implements IFileOrganizer {
   
   @Override
   public Aluno getAluno(long matric) {
+    
+    if(matric <= 0){
+      return null;
+    }
+    
+    int hash = this.hash(matric);
+    
+    int pos = hash;
+  
+    ByteBuffer seekerResult = this.alunoBufferAt(hash);
+    
+    if(seekerResult.getLong() == matric) {
+      return Conversor.toAluno(seekerResult);
+    }else{
+      int pcStep = this.brentStep(matric);
+      pos += pcStep;
+      seekerResult = this.alunoBufferAt(pos);
+      
+      while(this.isBufferReal(seekerResult)){
+        if(seekerResult.getLong() == matric){
+          return Conversor.toAluno(seekerResult);
+        }else{
+          pos += pcStep;
+          seekerResult = this.alunoBufferAt(pos);
+        }
+      }
+    }
+    
     return null;
   }
   
   @Override
   public Aluno delAluno(long matric) {
+    if(matric <= 0){
+      return null;
+    }
+  
+    int hash = this.hash(matric);
+  
+    int pos = hash;
+  
+    ByteBuffer seekerResult = this.alunoBufferAt(hash);
+  
+    if(seekerResult.getLong() == matric) {
+      // remove
+    }else{
+      int pcStep = this.brentStep(matric);
+      pos += pcStep;
+      seekerResult = this.alunoBufferAt(pos);
+    
+      while(this.isBufferReal(seekerResult)){
+        if(seekerResult.getLong() == matric){
+          // remove
+        }else{
+          pos += pcStep;
+          seekerResult = this.alunoBufferAt(pos);
+        }
+      }
+    }
+  
     return null;
   }
 }
